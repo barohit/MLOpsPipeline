@@ -5,7 +5,8 @@ from FeatureEngineering.base.base_job import BaseJob
 
 
 class TeamPlayerCountJob(BaseJob):
-    def process_data(self, df: DataFrame) -> DataFrame:
+    def process_data(self, dataframes: dict[str, DataFrame]) -> DataFrame:
+        df = dataframes["players"]
         return (
             df.groupBy("team_id")
             .agg(count("id").alias("player_count"))

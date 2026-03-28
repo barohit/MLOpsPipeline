@@ -5,7 +5,8 @@ from FeatureEngineering.base.base_job import BaseJob
 
 
 class ConferenceWinRateJob(BaseJob):
-    def process_data(self, df: DataFrame) -> DataFrame:
+    def process_data(self, dataframes: dict[str, DataFrame]) -> DataFrame:
+        df = dataframes["teams"]
         aggregated_df = (
             df.groupBy("conference_id")
             .agg(
