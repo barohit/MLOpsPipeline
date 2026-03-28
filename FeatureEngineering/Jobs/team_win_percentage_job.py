@@ -5,7 +5,8 @@ from FeatureEngineering.base.base_job import BaseJob
 
 
 class TeamWinPercentageJob(BaseJob):
-    def process_data(self, df: DataFrame) -> DataFrame:
+    def process_data(self, dataframes: dict[str, DataFrame]) -> DataFrame:
+        df = dataframes["players"]
         total_games = col("regular_season_wins") + col("regular_season_losses")
 
         return (

@@ -1,4 +1,4 @@
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession, DataFrame
 
 from Infrastructure.base.base_data_source import BaseDataSource
 from Infrastructure.base.base_feature_store import BaseFeatureStore
@@ -18,7 +18,11 @@ class BaseFeatureProcess:
         self.job = job
         self.feature_store = feature_store
 
-    def run(self, source_table: str, output_table: str) -> None:
-        df = self.data_source.read_table(self.spark, source_table)
-        feature_df = self.job.process_data(df)
+    def run(self, source_tables: list[str], output_table: str) -> None:
+        dataframes: dict[str, DataFrame] = {
+            table_name: self.data_source.read_table(self.spark, table_name)
+            for table_name in source_tables
+        }
+
+        feature_df = self.job.process_data(dataframes)
         self.feature_store.publish(feature_df, output_table)
