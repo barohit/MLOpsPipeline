@@ -1,7 +1,7 @@
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import count, col
 
-from src.FeatureEngineering.base.base_job import BaseJob
+from src.Infrastructure.Interfaces.base_job import BaseJob
 
 
 class ConferenceTeamCountJob(BaseJob):

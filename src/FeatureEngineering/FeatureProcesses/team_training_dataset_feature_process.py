@@ -1,5 +1,5 @@
-from src.FeatureEngineering.base.base_feature_process import BaseFeatureProcess
-from src.FeatureEngineering.jobs.team_training_dataset_job import TeamTrainingDatasetJob
+from src.Infrastructure.Interfaces.base_feature_process import BaseFeatureProcess
+from src.FeatureEngineering.Jobs.team_training_dataset_job import TeamTrainingDatasetJob
 
 
 class TeamTrainingDatasetFeatureProcess(BaseFeatureProcess):

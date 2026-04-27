@@ -1,7 +1,7 @@
 from pyspark.sql import DataFrame
 from pyspark.sql.functions import avg, col, sum as spark_sum, when
 
-from src.FeatureEngineering.base.base_job import BaseJob
+from src.Infrastructure.Interfaces.base_job import BaseJob
 
 
 class TeamAggregatedStatsJob(BaseJob):

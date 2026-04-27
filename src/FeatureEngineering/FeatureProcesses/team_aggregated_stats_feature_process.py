@@ -1,5 +1,5 @@
-from src.FeatureEngineering.base.base_feature_process import BaseFeatureProcess
-from src.FeatureEngineering.jobs.team_aggregated_stats_job import TeamAggregatedStatsJob
+from src.Infrastructure.Interfaces.base_feature_process import BaseFeatureProcess
+from src.FeatureEngineering.Jobs.team_aggregated_stats_job import TeamAggregatedStatsJob
 
 
 class TeamAggregatedStatsFeatureProcess(BaseFeatureProcess):

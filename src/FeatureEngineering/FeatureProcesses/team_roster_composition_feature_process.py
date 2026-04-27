@@ -1,5 +1,5 @@
-from src.FeatureEngineering.base.base_feature_process import BaseFeatureProcess
-from src.FeatureEngineering.jobs.team_roster_composition_job import TeamRosterCompositionJob
+from src.Infrastructure.Interfaces.base_feature_process import BaseFeatureProcess
+from src.FeatureEngineering.Jobs.team_roster_composition_job import TeamRosterCompositionJob
 
 
 class TeamRosterCompositionFeatureProcess(BaseFeatureProcess):

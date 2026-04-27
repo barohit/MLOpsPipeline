@@ -1,5 +1,5 @@
-from src.FeatureEngineering.base.base_feature_process import BaseFeatureProcess
-from src.FeatureEngineering.jobs.player_derived_metrics_job import PlayerDerivedMetricsJob
+from src.Infrastructure.Interfaces.base_feature_process import BaseFeatureProcess
+from src.FeatureEngineering.Jobs.player_derived_metrics import PlayerDerivedMetricsJob
 
 
 class PlayerDerivedMetricsFeatureProcess(BaseFeatureProcess):
