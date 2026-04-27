@@ -1,7 +1,7 @@
 from pyspark.sql import DataFrame
 
-from src.Infrastructure.base.base_feature_store import BaseFeatureStore
-from src.Infrastructure.base.base_credentials_provider import BaseCredentialProvider
+from src.Infrastructure.Interfaces.base_feature_store import BaseFeatureStore
+from src.Infrastructure.Interfaces.base_credentials_provider import BaseCredentialProvider
 
 
 class SnowflakeFeatureStore(BaseFeatureStore):

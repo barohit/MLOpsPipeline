@@ -1,1 +1,3 @@
 .venv/
+scripts/fix_imports.py
+scripts/fix_source_layout.py

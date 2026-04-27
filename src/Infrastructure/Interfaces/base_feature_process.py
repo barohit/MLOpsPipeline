@@ -1,8 +1,8 @@
 from pyspark.sql import SparkSession, DataFrame
 
-from src.Infrastructure.base.base_data_source import BaseDataSource
-from src.Infrastructure.base.base_feature_store import BaseFeatureStore
-from src.FeatureEngineering.base.base_job import BaseJob
+from src.Infrastructure.Interfaces.base_data_source import BaseDataSource
+from src.Infrastructure.Interfaces.base_feature_store import BaseFeatureStore
+from src.Infrastructure.Interfaces.base_job import BaseJob
 
 
 class BaseFeatureProcess:
