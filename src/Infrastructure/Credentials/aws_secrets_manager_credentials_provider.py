@@ -1,6 +1,6 @@
 import json
 import boto3
-from credential_providers.base_credential_provider import BaseCredentialProvider
+from src.Infrastructure.Interfaces.base_credentials_provider import BaseCredentialProvider
 
 class AWSSecretsManagerCredentialProvider(BaseCredentialProvider):
     def __init__(self, secret_name: str, region_name: str):

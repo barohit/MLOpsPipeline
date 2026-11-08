@@ -6,8 +6,8 @@ from src.Infrastructure.Interfaces.base_job import BaseJob
 
 class ConferenceTeamCountJob(BaseJob):
     def process_data(self, dataframes: dict[str, DataFrame]) -> DataFrame:
+        df = dataframes["teams"]
         return (
-            df = dataframes["teams"]
             df.groupBy("conference_id")
             .agg(count("id").alias("team_count"))
             .select(

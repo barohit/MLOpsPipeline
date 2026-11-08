@@ -1,5 +1,5 @@
 import os
-from credential_providers.base_credential_provider import BaseCredentialProvider
+from src.Infrastructure.Interfaces.base_credentials_provider import BaseCredentialProvider
 
 class EnvironmentCredentialProvider(BaseCredentialProvider):
     def __init__(self, username_env_var: str, password_env_var: str):

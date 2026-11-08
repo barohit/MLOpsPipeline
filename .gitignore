@@ -1,3 +1,11 @@
 .venv/
+__pycache__/
+.pytest_cache/
+mlruns/
+k8s_manifests/
+*.pkl
+.env
+repo_dump.txt
+gh_dump.txt
 scripts/fix_imports.py
 scripts/fix_source_layout.py

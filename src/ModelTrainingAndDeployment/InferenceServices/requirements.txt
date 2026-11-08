@@ -1,0 +1,7 @@
+# only what the inference container needs
+fastapi
+uvicorn
+pandas
+scikit-learn
+prometheus-client
+pydantic

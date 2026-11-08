@@ -1,6 +1,6 @@
 from pyspark.sql import SparkSession, DataFrame
-from data_sources.base_data_source import BaseDataSource
-from credential_providers.base_credential_provider import BaseCredentialProvider
+from src.Infrastructure.Interfaces.base_data_source import BaseDataSource
+from src.Infrastructure.Interfaces.base_credentials_provider import BaseCredentialProvider
 
 class PostgreSQLDataSource(BaseDataSource):
     def __init__(

@@ -63,6 +63,5 @@ CREATE INDEX IF NOT EXISTS idx_players_team_id
 CREATE INDEX IF NOT EXISTS idx_players_name
     ON players(player_name);
 
-CREATE INDEX IF NOT EXISTS idx_player_season_stats (
-    ON player_season_stats(player_id)
-)
+CREATE INDEX IF NOT EXISTS idx_player_season_stats_player_id
+    ON player_season_stats(player_id);

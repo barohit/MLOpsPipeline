@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from ModelTraining.base.base_model_deployer import BaseModelDeployer
+from src.Infrastructure.Interfaces.base_model_deployer import BaseModelDeployer
 
 
 class KubernetesModelDeployer(BaseModelDeployer):

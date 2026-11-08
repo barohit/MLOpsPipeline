@@ -1,36 +1,70 @@
 # MLOps Pipeline
 
-This is an end-to-end MLOps pipeline — data ingestion, feature engineering, model training, deployment, and monitoring — built around swappable infrastructure components so the platform isn't tied to a specific vendor or backend.
+An end-to-end ML pipeline I built to get hands-on with the parts of the MLOps lifecycle I hadn't done professionally: ingesting data, computing features with PySpark, training, registering a model, serving it, and monitoring the service.
 
-The reference use case is predicting NCAA men's basketball regular season win percentage, but the pipeline itself is model-agnostic. The basketball stuff is just one example of what runs on top of it.
+The use case is predicting an NCAA men's basketball team's regular-season wins. Teams and rosters are seeded by hand and the player stats are randomly generated, so the model has very little real signal. The model is a baseline. The pipeline around it is the point.
 
-## What's in here
+## How it fits together
 
-**Data ingestion** currently has SQL seed scripts for the source data (teams, players, conferences, season stats) plus a starter ingestion service. An actual REST API for ingestion is on the to-do list.
+```
+Flask ingestion API  ->  Postgres source tables (teams, players, player_season_stats)
+  -> PySpark feature jobs  ->  feature tables
+  -> training dataset  ->  training (linear regression, MAE / RMSE / R²)
+  -> model registry (local files or MLflow)
+  -> Kubernetes manifests (Deployment, Service, Grafana dashboard)
+  -> FastAPI inference service with Prometheus metrics
+```
 
-**Feature engineering** pulls data from the configured source (PostgreSQL or Snowflake), runs jobs to compute features, and publishes to a feature store. The feature store tables are defined in `src/DataIngestion/sql/setup_feature_store_tables.sql`. Feature processes combine the data extraction and the job logic into one object, and the design is set up so jobs can run locally or on external infra like EMR — the EMR/Spark integration itself isn't wired up yet, that's planned.
+Everything that touches infrastructure sits behind a base class in `src/Infrastructure/Interfaces`: data source, feature store, credentials provider, model registry, model deployer. Postgres and Snowflake, local files and MLflow, and the three credential providers (environment, AWS Secrets Manager, Vault) are interchangeable without touching the jobs. There is also an in-memory data source and feature store, so the whole pipeline can run in a test with no database.
 
-**Model training and deployment** is wired up end-to-end for the basketball use case: a linear regression training process, model registry (MLflow or local file), Kubernetes deployer, and a FastAPI inference service with a Dockerfile.
+`src/ModelTrainingAndDeployment/feature_schema.py` lists the feature columns once. Training and the inference service both import it, and the service refuses to start if the registered model was trained on a different feature list.
 
-**Monitoring** uses Prometheus and Grafana — there's a monitoring service for tracking the win percentage prediction model in production.
+## What is tested and what is not
 
-**Infrastructure** is interface-driven. Data sources, feature stores, credentials providers, model registries, and deployers all sit behind base interfaces, so swapping PostgreSQL for Snowflake or local file storage for MLflow doesn't require touching the code that uses them. Credentials can come from environment variables, AWS Secrets Manager, or HashiCorp Vault depending on where you're running.
+Run automatically by `pytest`:
 
-## Tech stack
+- The feature jobs (player metrics, roster composition, conference jobs, team win percentage).
+- The whole pipeline in one process, with no database: source tables -> four feature processes -> training -> local registry -> inference service (`/predict`, `/metrics`). It also checks that the service refuses a model whose feature list doesn't match, and that every metric the Grafana dashboard queries is actually exported.
+- The MLflow registry: registers a model, reloads it, and checks versions increment (SQLite backend).
+- The Kubernetes deployer: checks the generated manifests (probes, env, scrape annotations, service port).
+- The ingestion API, against a fake database connection.
 
-Python, FastAPI, scikit-learn, PostgreSQL, Snowflake, MLflow, Kubernetes, Docker, Prometheus, Grafana, AWS Secrets Manager, HashiCorp Vault, Pydantic, pytest.
+Not tested yet:
+
+- Postgres and Snowflake over JDBC. The code is written but has never run against a real database. The SQL scripts parse as valid PostgreSQL but are not loaded in an automated test.
+- The AWS Secrets Manager and Vault credential providers.
+- The Kubernetes manifests are generated and checked, but never applied to a cluster.
+- The Docker image for the inference service has not been built yet.
+
+Known gaps:
+
+- The inference service loads a model from a local registry directory only. The deployer passes the registry URI to the pod as `MODEL_URI`, but the pod would need that directory mounted. Loading `models:/...` from MLflow in the service is not implemented.
+- Monitoring is service-level only: request rate, errors, latency. There is no data drift or model-quality monitoring.
+- Feature stores overwrite their tables each run, so there is no point-in-time history.
+- Spark runs locally. There is no orchestration (Airflow / Step Functions), no EMR, no CI and no Terraform yet.
 
 ## Running it
 
 ```bash
 pip install -r requirements.txt
+python -m pytest
 ```
 
-Set up the database with the SQL scripts in `src/DataIngestion/sql/`, run a feature job from `src/FeatureEngineering/Jobs/`, train a model, then build and run the inference service in `src/ModelTrainingAndDeployment/InferenceServices/`.
+To run against a real database, create the tables and seed data with the scripts in `src/DataIngestion/sql/` (`setup_data_source_tables.sql` first), then start the ingestion API with `PGUSER` and `PGPASSWORD` set (`PGHOST`, `PGPORT` and `PGDATABASE` are optional).
 
-## To-do
+MLflow: use a database backend, for example `MLflowModelRegistry(tracking_uri="sqlite:///mlflow.db", experiment_name="win-model")`. Current MLflow versions refuse the plain `./mlruns` file store by default.
 
-- REST API for data ingestion (currently SQL-only)
-- Wire up Spark/EMR for distributed feature jobs
-- Expand integration test coverage
-- Terraform for AWS deployment
+The inference image is built from the repo root:
+
+```bash
+docker build -f src/ModelTrainingAndDeployment/InferenceServices/Dockerfile -t mlops-inference .
+```
+
+Training and serving must use the same scikit-learn version, because the model is pickled.
+
+## Next
+
+- Data drift monitoring on the inference service, exported to Prometheus
+- Load models from MLflow in the inference service
+- GitHub Actions to run the tests on every push
+- Orchestration for the feature and training jobs, and Terraform for the AWS side

@@ -24,8 +24,8 @@ class PostgreSQLFeatureStore(BaseFeatureStore):
         credentials = self.credential_provider.get_credentials()
 
         return {
-            "user": credentials.username,
-            "password": credentials.password,
+            "user": credentials["username"],
+            "password": credentials["password"],
             "driver": "org.postgresql.Driver",
         }
 

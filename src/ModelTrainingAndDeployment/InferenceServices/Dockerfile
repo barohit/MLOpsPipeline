@@ -1,10 +1,15 @@
+# Build from the repo root:
+#   docker build -f src/ModelTrainingAndDeployment/InferenceServices/Dockerfile -t mlops-inference .
 FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY src/ModelTrainingAndDeployment/InferenceServices/requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py .
+COPY src/__init__.py src/__init__.py
+COPY src/ModelTrainingAndDeployment src/ModelTrainingAndDeployment
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8000
+
+CMD ["uvicorn", "src.ModelTrainingAndDeployment.InferenceServices.team_regular_season_win_percentage_linear_regression_prediction_model_inference_service:app", "--host", "0.0.0.0", "--port", "8000"]
