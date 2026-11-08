@@ -1,5 +1,5 @@
 import hvac
-from credential_providers.base_credential_provider import BaseCredentialProvider
+from src.Infrastructure.Interfaces.base_credentials_provider import BaseCredentialProvider
 
 class VaultCredentialProvider(BaseCredentialProvider):
     def __init__(self, url: str, token: str, secret_path: str):

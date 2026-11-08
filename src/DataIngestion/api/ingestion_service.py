@@ -1,18 +1,24 @@
+import os
+from contextlib import closing
+
 from flask import Flask, request, jsonify
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+from src.Infrastructure.Credentials.environment_credentials_provider import EnvironmentCredentialProvider
 
 
 app = Flask(__name__)
 
 
 def get_connection():
+    credentials = EnvironmentCredentialProvider("PGUSER", "PGPASSWORD").get_credentials()
     return psycopg2.connect(
-        host="localhost",
-        port=5432,
-        database="mlops_pipeline",
-        user="rohit",
-        password="your_password_here",
+        host=os.getenv("PGHOST", "localhost"),
+        port=int(os.getenv("PGPORT", "5432")),
+        database=os.getenv("PGDATABASE", "mlops_pipeline"),
+        user=credentials["username"],
+        password=credentials["password"],
         cursor_factory=RealDictCursor,
     )
 
@@ -47,10 +53,10 @@ def upsert_team():
         data["regular_season_losses"],
     )
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, values)
-            result = cur.fetchone()
+    # `with conn` only commits or rolls back; closing() is what releases the connection
+    with closing(get_connection()) as conn, conn, conn.cursor() as cur:
+        cur.execute(query, values)
+        result = cur.fetchone()
 
     return jsonify(result)
 
@@ -87,10 +93,10 @@ def upsert_player():
         data.get("hometown"),
     )
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, values)
-            result = cur.fetchone()
+    # `with conn` only commits or rolls back; closing() is what releases the connection
+    with closing(get_connection()) as conn, conn, conn.cursor() as cur:
+        cur.execute(query, values)
+        result = cur.fetchone()
 
     return jsonify(result)
 
@@ -163,10 +169,10 @@ def upsert_player_season_stats():
         data["total_turnovers"],
     )
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, values)
-            result = cur.fetchone()
+    # `with conn` only commits or rolls back; closing() is what releases the connection
+    with closing(get_connection()) as conn, conn, conn.cursor() as cur:
+        cur.execute(query, values)
+        result = cur.fetchone()
 
     return jsonify(result)
 

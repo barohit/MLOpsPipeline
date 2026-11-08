@@ -1,7 +1,7 @@
 import mlflow
 import mlflow.sklearn
 
-from ModelTraining.base.base_model_registry import BaseModelRegistry
+from src.Infrastructure.Interfaces.base_model_registry import BaseModelRegistry
 
 
 #Note: MLflow is an open source Machine Learning modle registry

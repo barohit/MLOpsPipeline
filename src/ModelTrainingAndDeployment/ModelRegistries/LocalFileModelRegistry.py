@@ -1,9 +1,9 @@
 import json
 import pickle
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
-from ModelTraining.base.base_model_registry import BaseModelRegistry
+from src.Infrastructure.Interfaces.base_model_registry import BaseModelRegistry
 
 
 class LocalFileModelRegistry(BaseModelRegistry):
@@ -28,7 +28,7 @@ class LocalFileModelRegistry(BaseModelRegistry):
             **metadata,
             "model_name": model_name,
             "version": version,
-            "registered_at": datetime.utcnow().isoformat()
+            "registered_at": datetime.now(timezone.utc).isoformat()
         }
 
         with open(metadata_file_path, "w", encoding="utf-8") as metadata_file:

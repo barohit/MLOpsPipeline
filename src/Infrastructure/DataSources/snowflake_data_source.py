@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession, DataFrame
 
-from data_sources.base_data_source import BaseDataSource
-from credential_providers.base_database_credential_provider import BaseDatabaseCredentialProvider
+from src.Infrastructure.Interfaces.base_data_source import BaseDataSource
+from src.Infrastructure.Interfaces.base_credentials_provider import BaseCredentialProvider
 
 
 class SnowflakeDataSource(BaseDataSource):
@@ -11,7 +11,7 @@ class SnowflakeDataSource(BaseDataSource):
         database_name: str,
         schema_name: str,
         warehouse: str,
-        credential_provider: BaseDatabaseCredentialProvider,
+        credential_provider: BaseCredentialProvider,
         role: str | None = None,
     ):
         self.account = account
@@ -23,7 +23,7 @@ class SnowflakeDataSource(BaseDataSource):
 
     def _get_auth(self):
         creds = self.credential_provider.get_credentials()
-        return creds.username, creds.password
+        return creds["username"], creds["password"]
 
     def _options(self):
         username, password = self._get_auth()

@@ -6,7 +6,7 @@ from src.Infrastructure.Interfaces.base_job import BaseJob
 
 class TeamWinPercentageJob(BaseJob):
     def process_data(self, dataframes: dict[str, DataFrame]) -> DataFrame:
-        df = dataframes["players"]
+        df = dataframes["teams"]
         total_games = col("regular_season_wins") + col("regular_season_losses")
 
         return (

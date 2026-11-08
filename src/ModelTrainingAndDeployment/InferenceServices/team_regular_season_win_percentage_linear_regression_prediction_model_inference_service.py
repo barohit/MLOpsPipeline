@@ -1,15 +1,19 @@
+import json
 import os
 import pickle
 import time
+from contextlib import asynccontextmanager
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.responses import Response
 
+from src.ModelTrainingAndDeployment.feature_schema import FEATURE_COLUMNS, MODEL_NAME as DEFAULT_MODEL_NAME
 
-MODEL_URI = os.getenv("MODEL_URI")
-MODEL_NAME = os.getenv("MODEL_NAME", "team_regular_season_win_count_linear_regression")
+
+MODEL_NAME = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 
 REQUEST_COUNT = Counter(
     "team_win_prediction_requests_total",
@@ -26,7 +30,6 @@ REQUEST_LATENCY = Histogram(
     "Prediction request latency in seconds",
 )
 
-app = FastAPI()
 model = None
 
 
@@ -49,17 +52,50 @@ class TeamRegularSeasonWinCountPredictionRequest(BaseModel):
     team_high_impact_player_count: float
 
 
-@app.on_event("startup")
-def startup_event():
-    global model
+# The request fields and the training features must be the same set. Fail at import, not at 2am.
+if set(TeamRegularSeasonWinCountPredictionRequest.model_fields) != set(FEATURE_COLUMNS):
+    raise RuntimeError("Request fields do not match feature_schema.FEATURE_COLUMNS")
 
-    if MODEL_URI is None:
+
+def check_feature_columns(registered_columns) -> None:
+    """Refuse to serve a model that was trained on different features than this service sends."""
+    if registered_columns is not None and list(registered_columns) != FEATURE_COLUMNS:
+        raise RuntimeError(
+            "Training/serving mismatch: the registered model was trained on "
+            f"{list(registered_columns)} but this service sends {FEATURE_COLUMNS}"
+        )
+
+
+def load_model(model_uri: str | None):
+    if not model_uri:
         raise RuntimeError("MODEL_URI environment variable is required")
 
-    model_file_path = os.path.join(MODEL_URI, "model.pkl")
+    model_file_path = os.path.join(model_uri, "model.pkl")
+    if not os.path.isfile(model_file_path):
+        raise RuntimeError(
+            f"No model.pkl in {model_uri}. This service loads from a LocalFileModelRegistry "
+            "directory; loading from an MLflow models:/ URI is not implemented yet."
+        )
 
     with open(model_file_path, "rb") as model_file:
-        model = pickle.load(model_file)
+        loaded_model = pickle.load(model_file)
+
+    metadata_file_path = os.path.join(model_uri, "metadata.json")
+    if os.path.isfile(metadata_file_path):
+        with open(metadata_file_path, encoding="utf-8") as metadata_file:
+            check_feature_columns(json.load(metadata_file).get("feature_columns"))
+
+    return loaded_model
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global model
+    model = load_model(os.getenv("MODEL_URI"))
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/health")
@@ -78,8 +114,6 @@ def metrics():
 
 @app.post("/predict")
 def predict(request: TeamRegularSeasonWinCountPredictionRequest):
-    global model
-
     REQUEST_COUNT.inc()
     start_time = time.perf_counter()
 
@@ -87,26 +121,9 @@ def predict(request: TeamRegularSeasonWinCountPredictionRequest):
         if model is None:
             raise HTTPException(status_code=500, detail="Model not loaded")
 
-        feature_vector = [[
-            request.team_points_per_minute,
-            request.team_two_point_percentage,
-            request.team_three_point_percentage,
-            request.team_free_throw_percentage,
-            request.team_assist_turnover_ratio,
-            request.team_non_offensive_foul_turnovers,
-            request.team_total_rebounds,
-            request.team_offensive_rebound_ratio,
-            request.team_steals_per_minute,
-            request.team_blocks_per_minute,
-            request.team_three_point_attempt_rate,
-            request.player_count,
-            request.avg_height_inches,
-            request.upperclassman_ratio,
-            request.experience_score,
-            request.team_high_impact_player_count,
-        ]]
-
-        prediction = float(model.predict(feature_vector)[0])
+        # A DataFrame with named columns: scikit-learn checks the names and order against training.
+        features = pd.DataFrame([request.model_dump()], columns=FEATURE_COLUMNS)
+        prediction = float(model.predict(features)[0])
 
         return {
             "model_name": MODEL_NAME,

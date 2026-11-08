@@ -1,5 +1,15 @@
+# everything needed to run the pipeline and the tests locally
+pyspark
+pandas
+scikit-learn
+mlflow
 fastapi
 uvicorn
-scikit-learn
+httpx
 prometheus-client
 pydantic
+flask
+psycopg2-binary
+boto3
+hvac
+pytest

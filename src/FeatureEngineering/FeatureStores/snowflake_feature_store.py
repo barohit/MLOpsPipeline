@@ -26,8 +26,8 @@ class SnowflakeFeatureStore(BaseFeatureStore):
 
         options = {
             "sfURL": f"{self.account}.snowflakecomputing.com",
-            "sfUser": credentials.username,
-            "sfPassword": credentials.password,
+            "sfUser": credentials["username"],
+            "sfPassword": credentials["password"],
             "sfDatabase": self.database_name,
             "sfSchema": self.schema_name,
             "sfWarehouse": self.warehouse,

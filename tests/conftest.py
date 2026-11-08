@@ -1,6 +1,3 @@
-import shutil
-import tempfile
-
 import pytest
 from pyspark.sql import SparkSession
 
@@ -11,14 +8,9 @@ def spark():
         SparkSession.builder
         .master("local[1]")
         .appName("mlops-pipeline-tests")
+        .config("spark.sql.shuffle.partitions", "2")
+        .config("spark.ui.enabled", "false")
         .getOrCreate()
     )
     yield spark
     spark.stop()
-
-
-@pytest.fixture
-def temp_dir():
-    directory = tempfile.mkdtemp()
-    yield directory
-    shutil.rmtree(directory, ignore_errors=True)
