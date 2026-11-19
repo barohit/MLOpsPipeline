@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mlops
+
+resources:
+  - ../../base
+  - services.yaml
+  - rollout.yaml
+
+configurations:
+  - rollout-transform.yaml
+
+# CI sets this per deploy: kustomize edit set image mlops-inference=<ecr-url>:<git-sha>
+images:
+  - name: mlops-inference
+    newName: REPLACE_WITH_ecr_repository_url
+    newTag: latest
+
+# Changing MODEL_URI renames this ConfigMap (kustomize adds a content hash), which
+# changes the pod template, which starts a new rollout. Pods pin an exact model
+# version; the registry's "champion" alias moves only after a rollout succeeds.
+# CI sets it with: kustomize edit set configmap inference-config --from-literal=MODEL_URI=...
+configMapGenerator:
+  - name: inference-config
+    literals:
+      - MODEL_NAME=team_regular_season_win_count_linear_regression
+      - MODEL_URI=models:/team_regular_season_win_count_linear_regression/1
+      - MLFLOW_TRACKING_URI=http://mlflow.mlops.svc.cluster.local:5000
+      - PREDICTION_LOG_PATH=-

@@ -1,0 +1,42 @@
+# Manual rollback after a rollout has finished: go back to the previous ReplicaSet
+# and point the registry's "champion" alias back at the version it replaced.
+# (During a rollout, a failed analysis already aborts and rolls back by itself.)
+name: rollback-model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: deploy-model
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r src/ModelTrainingAndDeployment/InferenceServices/requirements.txt
+      - name: tools
+        run: |
+          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER_NAME }}" --region "${{ vars.AWS_REGION }}"
+          curl -sSLo kubectl-argo-rollouts https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts && sudo mv kubectl-argo-rollouts /usr/local/bin/
+      - name: roll back the pods
+        run: |
+          kubectl argo rollouts undo inference -n mlops
+          kubectl argo rollouts status inference -n mlops --timeout 20m
+      - name: roll back the registry alias
+        run: |
+          kubectl -n mlops port-forward svc/mlflow 5000:5000 > /tmp/port-forward.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:5000/health && break; sleep 2; done
+          MLFLOW_TRACKING_URI=http://localhost:5000 python -m src.ModelTrainingAndDeployment.ModelRegistries.promote_model rollback

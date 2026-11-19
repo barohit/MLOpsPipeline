@@ -1,0 +1,94 @@
+# Blue-green: the new version (green) comes up at full size next to the current one
+# (blue) and gets no user traffic. A smoke test runs against green; then traffic
+# switches all at once. Blue stays running for 10 minutes, so rollback is just
+# switching the Service back, with no pods to start.
+#
+# Use blue-green when you want a clean, all-at-once cutover with an instant way back,
+# and you've already validated the model offline (the evaluation gate in CI).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: inference
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      serviceAccountName: inference
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference
+          image: mlops-inference
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: inference-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    blueGreen:
+      activeService: inference
+      previewService: inference-preview
+      # CI (or a person) promotes after reviewing; the smoke test must pass first
+      autoPromotionEnabled: false
+      prePromotionAnalysis:
+        templates:
+          - templateName: smoke-test
+        args:
+          - name: service
+            value: inference-preview
+      # After the switch, watch the new version under real traffic. If this fails
+      # while blue is still up, Argo switches traffic back to blue automatically.
+      postPromotionAnalysis:
+        templates:
+          - templateName: error-rate
+          - templateName: latency-p99
+        args:
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+      scaleDownDelaySeconds: 600

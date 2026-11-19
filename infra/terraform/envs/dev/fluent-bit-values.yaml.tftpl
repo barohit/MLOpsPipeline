@@ -1,0 +1,43 @@
+serviceAccount:
+  create: true
+  name: fluent-bit
+  annotations:
+    eks.amazonaws.com/role-arn: ${role_arn}
+
+config:
+  # Only the inference pods' logs
+  inputs: |
+    [INPUT]
+        Name              tail
+        Path              /var/log/containers/*_${app_namespace}_inference-*.log
+        multiline.parser  cri
+        Tag               kube.*
+        Mem_Buf_Limit     20MB
+        Skip_Long_Lines   On
+
+  # Merge each JSON log line into the record, then keep only prediction records
+  filters: |
+    [FILTER]
+        Name         kubernetes
+        Match        kube.*
+        Merge_Log    On
+        Keep_Log     Off
+        Labels       Off
+        Annotations  Off
+
+    [FILTER]
+        Name   grep
+        Match  kube.*
+        Regex  log_type ^prediction$
+
+  outputs: |
+    [OUTPUT]
+        Name             s3
+        Match            kube.*
+        bucket           ${bucket}
+        region           ${region}
+        total_file_size  10M
+        upload_timeout   5m
+        use_put_object   On
+        s3_key_format    /prediction-logs/%Y/%m/%d/$UUID.jsonl
+        json_date_key    false

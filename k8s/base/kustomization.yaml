@@ -1,0 +1,29 @@
+# Everything except the Rollout itself. Apply one of the rollout overlays, which
+# include this base:
+#   kubectl apply -k k8s/rollouts/canary
+#   kubectl apply -k k8s/rollouts/blue-green
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: mlops
+
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - ../analysis
+  - ../monitoring
+  - ../jobs
+  - ../mlflow
+
+# inference-config (which model version to serve) is generated in each rollout
+# overlay, next to the Rollout it drives.
+configMapGenerator:
+  - name: platform-config
+    literals:
+      - ARTIFACTS_BUCKET=REPLACE_WITH_artifacts_bucket_OUTPUT
+
+# The inference image is set in each rollout overlay (CI updates it there)
+images:
+  - name: mlops-mlflow
+    newName: REPLACE_WITH_ecr_mlflow_repository_url
+    newTag: latest

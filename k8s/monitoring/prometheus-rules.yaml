@@ -1,0 +1,76 @@
+# Service health alerts come from the pods' own metrics. Drift alerts come from the
+# gauges the daily drift CronJob pushes to the Pushgateway.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: inference
+spec:
+  groups:
+    - name: inference-service
+      rules:
+        - alert: InferenceHighErrorRate
+          expr: |
+            sum(rate(team_win_prediction_errors_total[5m]))
+              / clamp_min(sum(rate(team_win_prediction_requests_total[5m])), 1e-9) > 0.02
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: More than 2% of prediction requests are failing
+            runbook: Check the newest rollout first (kubectl argo rollouts get rollout inference -n mlops); abort or undo it if it lines up.
+
+        - alert: InferenceHighLatencyP99
+          expr: |
+            histogram_quantile(0.99, sum(rate(team_win_prediction_request_latency_seconds_bucket[5m])) by (le)) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: p99 prediction latency is above 500ms
+
+        - alert: InferenceNoReadyPods
+          expr: absent(up{namespace="mlops", pod=~"inference-.*"} == 1)
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: No inference pod is being scraped successfully
+
+        - alert: PredictionLogsDropping
+          expr: increase(team_win_prediction_log_errors_total[15m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: Predictions are not reaching the prediction log, so drift checks will be blind
+
+    - name: model-drift
+      rules:
+        - alert: FeatureDataDrift
+          expr: model_feature_psi > 0.25
+          labels:
+            severity: warning
+          annotations:
+            summary: "Feature {{ $labels.feature }} has shifted from training (PSI {{ $value | printf \"%.2f\" }})"
+            runbook: Confirm the upstream feature job is correct before treating it as real drift; then check whether accuracy has moved.
+
+        - alert: PredictionDistributionDrift
+          expr: model_prediction_psi > 0.25
+          labels:
+            severity: warning
+          annotations:
+            summary: The model's outputs have shifted from what it produced on training data
+
+        - alert: ConceptDrift
+          expr: model_live_rmse_ratio > 1.25
+          labels:
+            severity: critical
+          annotations:
+            summary: "Live RMSE is {{ $value | printf \"%.2f\" }}x the holdout RMSE"
+            runbook: Retrain on recent labeled data and send the candidate through the evaluation gate and a canary rollout.
+
+        - alert: DriftCheckStale
+          expr: time() - max(model_drift_check_last_run_timestamp_seconds) > 2 * 86400
+          labels:
+            severity: warning
+          annotations:
+            summary: The drift check hasn't reported in two days; drift alerts can't fire while it's down

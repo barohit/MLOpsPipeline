@@ -1,0 +1,86 @@
+{
+  "title": "Team win model: serving and drift",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "title": "Requests per second by model version",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (model_version) (rate(team_win_prediction_requests_total[5m]))", "legendFormat": "v{{model_version}}"}
+      ]
+    },
+    {
+      "title": "Error ratio by model version",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (model_version) (rate(team_win_prediction_errors_total[5m])) / clamp_min(sum by (model_version) (rate(team_win_prediction_requests_total[5m])), 1e-9)", "legendFormat": "v{{model_version}}"}
+      ]
+    },
+    {
+      "title": "p50 / p99 latency",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(team_win_prediction_request_latency_seconds_bucket[5m])))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(team_win_prediction_request_latency_seconds_bucket[5m])))", "legendFormat": "p99"}
+      ]
+    },
+    {
+      "title": "Mean prediction by model version",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "sum by (model_version) (rate(team_win_prediction_value_sum[15m])) / sum by (model_version) (rate(team_win_prediction_value_count[15m]))", "legendFormat": "v{{model_version}}"}
+      ]
+    },
+    {
+      "title": "Feature PSI vs training (last drift check)",
+      "type": "bargauge",
+      "gridPos": {"x": 0, "y": 16, "w": 12, "h": 10},
+      "targets": [
+        {"expr": "model_feature_psi", "legendFormat": "{{feature}}"}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 0.1},
+            {"color": "red", "value": 0.25}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Live RMSE / holdout RMSE (concept drift)",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 16, "w": 6, "h": 5},
+      "targets": [{"expr": "model_live_rmse_ratio"}],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [
+            {"color": "green", "value": null},
+            {"color": "yellow", "value": 1.1},
+            {"color": "red", "value": 1.25}
+          ]}
+        }
+      }
+    },
+    {
+      "title": "Labeled predictions in window",
+      "type": "stat",
+      "gridPos": {"x": 18, "y": 16, "w": 6, "h": 5},
+      "targets": [{"expr": "model_labeled_count"}]
+    },
+    {
+      "title": "Drift status (-1 not enough data, 0 ok, 1 warning, 2 alert)",
+      "type": "stat",
+      "gridPos": {"x": 12, "y": 21, "w": 12, "h": 5},
+      "targets": [{"expr": "model_drift_status", "legendFormat": "{{kind}}"}]
+    }
+  ]
+}

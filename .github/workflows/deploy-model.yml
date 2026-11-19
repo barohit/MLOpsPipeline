@@ -1,0 +1,123 @@
+# Deploy a registered model version:
+#   evaluation gate -> image build -> rollout (canary or blue-green) -> promote alias
+#
+# If the gate fails, nothing is deployed. If an analysis fails mid-rollout, Argo
+# aborts it, traffic stays on (or returns to) the old version, and the registry's
+# "champion" alias is never moved.
+name: deploy-model
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_version:
+        description: Registered model version to deploy (e.g. 7)
+        required: true
+      strategy:
+        description: Rollout strategy
+        type: choice
+        options: [canary, blue-green]
+        default: canary
+      holdout_version:
+        description: Frozen holdout to gate on
+        default: v1
+
+permissions:
+  id-token: write
+  contents: write
+
+concurrency: deploy-model
+
+env:
+  MODEL_NAME: team_regular_season_win_count_linear_regression
+  OVERLAY: k8s/rollouts/${{ inputs.strategy }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r src/ModelTrainingAndDeployment/InferenceServices/requirements.txt
+
+      - name: tools (kubeconfig, kustomize, argo rollouts plugin)
+        run: |
+          aws eks update-kubeconfig --name "${{ vars.EKS_CLUSTER_NAME }}" --region "${{ vars.AWS_REGION }}"
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar xz
+          sudo mv kustomize /usr/local/bin/
+          curl -sSLo kubectl-argo-rollouts https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+          chmod +x kubectl-argo-rollouts && sudo mv kubectl-argo-rollouts /usr/local/bin/
+
+      # The MLflow server is only reachable inside the cluster
+      - name: connect to MLflow
+        run: |
+          kubectl -n mlops port-forward svc/mlflow 5000:5000 > /tmp/port-forward.log 2>&1 &
+          for _ in $(seq 1 30); do curl -sf http://localhost:5000/health && break; sleep 2; done
+          echo "MLFLOW_TRACKING_URI=http://localhost:5000" >> "$GITHUB_ENV"
+
+      - name: evaluation gate
+        run: |
+          aws s3 cp --recursive "s3://${{ vars.ARTIFACTS_BUCKET }}/holdouts/${{ inputs.holdout_version }}" holdout
+          python -m src.ModelTrainingAndDeployment.Evaluation.run_gate \
+            --holdout-dir holdout \
+            --candidate-uri "models:/$MODEL_NAME/${{ inputs.model_version }}" \
+            --production-uri "models:/$MODEL_NAME@champion" \
+            --allow-missing-production \
+            --report gate_report.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gate-report
+          path: gate_report.json
+
+      - name: build and push image
+        id: image
+        run: |
+          repo="${{ vars.ECR_REPOSITORY_URL }}"
+          tag="${GITHUB_SHA::12}"
+          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${repo%%/*}"
+          # Tags are immutable: if this commit's image already exists, reuse it
+          if ! aws ecr describe-images --repository-name "${repo#*/}" --image-ids imageTag="$tag" > /dev/null 2>&1; then
+            docker build -f src/ModelTrainingAndDeployment/InferenceServices/Dockerfile -t "$repo:$tag" .
+            docker push "$repo:$tag"
+          fi
+          echo "ref=$repo:$tag" >> "$GITHUB_OUTPUT"
+
+      - name: mark challenger
+        run: python -m src.ModelTrainingAndDeployment.ModelRegistries.promote_model challenger --version "${{ inputs.model_version }}"
+
+      - name: start rollout
+        run: |
+          cd "$OVERLAY"
+          kustomize edit set image "mlops-inference=${{ steps.image.outputs.ref }}"
+          kustomize edit set configmap inference-config \
+            --from-literal="MODEL_URI=models:/$MODEL_NAME/${{ inputs.model_version }}"
+          kubectl apply -k .
+
+      - name: wait for rollout
+        run: bash scripts/ci/wait_for_rollout.sh "${{ inputs.strategy }}" 2700
+
+      - name: promote to champion
+        run: python -m src.ModelTrainingAndDeployment.ModelRegistries.promote_model promote --version "${{ inputs.model_version }}"
+
+      # Keep git in sync with what the cluster runs
+      - name: record the deployed version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$OVERLAY/kustomization.yaml"
+          git commit -m "deploy model v${{ inputs.model_version }} (${{ inputs.strategy }})"
+          git push
+
+      - name: abort on failure
+        if: failure()
+        run: kubectl argo rollouts abort inference -n mlops || true

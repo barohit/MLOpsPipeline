@@ -1,0 +1,7 @@
+# cp terraform.tfvars.example terraform.tfvars and fill in
+region                = "us-east-1"
+artifacts_bucket_name = "yourname-mlops-dev-artifacts"
+state_bucket_name     = "yourname-terraform-state"
+github_repository     = "barohit/MLOpsPipeline"
+admin_principal_arns  = ["arn:aws:iam::123456789012:user/you"]
+public_access_cidrs   = ["203.0.113.10/32"]

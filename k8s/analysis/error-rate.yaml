@@ -1,0 +1,25 @@
+# Fails the rollout if more than 1% of the new version's requests error.
+# Series are filtered to the new pods by rollouts_pod_template_hash, which the
+# PodMonitor copies from the pod label onto every metric.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: error-rate
+spec:
+  args:
+    - name: canary-hash
+    - name: prometheus-address
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+    - name: error-rate
+      interval: 1m
+      count: 5
+      failureLimit: 1
+      successCondition: result[0] < 0.01
+      provider:
+        prometheus:
+          address: "{{args.prometheus-address}}"
+          query: |
+            (sum(rate(team_win_prediction_errors_total{rollouts_pod_template_hash="{{args.canary-hash}}"}[2m])) or vector(0))
+            /
+            clamp_min(sum(rate(team_win_prediction_requests_total{rollouts_pod_template_hash="{{args.canary-hash}}"}[2m])), 1e-9)

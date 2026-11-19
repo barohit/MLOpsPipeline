@@ -1,0 +1,38 @@
+# inference         what clients call; selects every inference pod (stable + canary)
+# inference-stable  Argo pins this to the stable version's pods
+# inference-canary  Argo pins this to the new version's pods (handy for direct checks)
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+spec:
+  selector:
+    app: inference
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-stable
+spec:
+  selector:
+    app: inference
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-canary
+spec:
+  selector:
+    app: inference
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
