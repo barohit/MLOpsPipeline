@@ -1,7 +1,11 @@
-# only what the inference container needs
+# what the inference container (and the drift CronJob, which reuses the image) needs
 fastapi
 uvicorn
 pandas
+numpy
 scikit-learn
 prometheus-client
 pydantic
+# load models:/ URIs from the MLflow registry; boto3 reads artifacts and prediction logs in S3
+mlflow-skinny
+boto3

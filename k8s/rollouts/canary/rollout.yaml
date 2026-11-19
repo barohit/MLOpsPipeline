@@ -1,0 +1,106 @@
+# Canary: the new model version takes a small share of real traffic first, and Argo
+# checks its error rate, latency and prediction distribution against the stable
+# version before giving it more. A failed check aborts and scales the canary to zero.
+#
+# Use canary when a bad model reaching everyone at once would be costly.
+#
+# Without a traffic router, Argo splits traffic by pod count: 10 replicas at
+# setWeight 10 means 1 canary pod. With the AWS Load Balancer Controller or a mesh,
+# add spec.strategy.canary.trafficRouting for exact percentages.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: inference
+spec:
+  replicas: 10
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      serviceAccountName: inference
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference
+          image: mlops-inference
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: inference-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # MLflow downloads model artifacts here
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  strategy:
+    canary:
+      canaryService: inference-canary
+      stableService: inference-stable
+      maxSurge: 1
+      maxUnavailable: 0
+      steps:
+        - setWeight: 10
+        - pause: {duration: 10m}
+        - analysis:
+            templates:
+              - templateName: error-rate
+              - templateName: latency-p99
+              - templateName: prediction-shift
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+              - name: stable-hash
+                valueFrom:
+                  podTemplateHashValue: Stable
+        - setWeight: 50
+        - pause: {duration: 10m}
+        - analysis:
+            templates:
+              - templateName: error-rate
+              - templateName: latency-p99
+            args:
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+        # After the last step Argo shifts 100% to the new version

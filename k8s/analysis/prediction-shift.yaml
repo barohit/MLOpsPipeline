@@ -1,0 +1,35 @@
+# Model-aware canary check. Stable and canary pods see the same mix of traffic, so
+# their average predictions should be close. A large gap means the new model behaves
+# very differently in production than the gate suggested, so the rollout stops for a
+# human to look. This catches training-serving skew, a wrong model version, or a
+# preprocessing bug that the offline evaluation could not see.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: prediction-shift
+spec:
+  args:
+    - name: canary-hash
+    - name: stable-hash
+    # Allowed gap in mean predicted wins
+    - name: max-shift
+      value: "3"
+    - name: prometheus-address
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+    - name: mean-prediction-shift
+      interval: 2m
+      count: 3
+      failureLimit: 1
+      successCondition: isNaN(result[0]) || result[0] < {{args.max-shift}}
+      provider:
+        prometheus:
+          address: "{{args.prometheus-address}}"
+          query: |
+            abs(
+              sum(rate(team_win_prediction_value_sum{rollouts_pod_template_hash="{{args.canary-hash}}"}[10m]))
+                / sum(rate(team_win_prediction_value_count{rollouts_pod_template_hash="{{args.canary-hash}}"}[10m]))
+              -
+              sum(rate(team_win_prediction_value_sum{rollouts_pod_template_hash="{{args.stable-hash}}"}[10m]))
+                / sum(rate(team_win_prediction_value_count{rollouts_pod_template_hash="{{args.stable-hash}}"}[10m]))
+            )

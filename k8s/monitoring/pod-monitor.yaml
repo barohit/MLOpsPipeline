@@ -1,0 +1,17 @@
+# Scrape /metrics on every inference pod. podTargetLabels copies Argo's
+# rollouts-pod-template-hash label onto each series (as rollouts_pod_template_hash),
+# which is how the analysis templates tell the old and new version apart.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: inference
+spec:
+  selector:
+    matchLabels:
+      app: inference
+  podTargetLabels:
+    - rollouts-pod-template-hash
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

@@ -1,0 +1,70 @@
+# Daily drift check for the model the registry marks as champion. Reuses the
+# inference image. Reads prediction logs and labels from S3 (through its own IAM
+# role), writes nothing to S3, and pushes gauges for the alert rules.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: drift-check
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          serviceAccountName: drift-checker
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: drift-check
+              image: mlops-inference
+              command: ["python", "-m", "src.MetricsAndMonitoring.Drift.run_drift_check"]
+              args:
+                - --model-uri=models:/$(MODEL_NAME)@champion
+                - --predictions=s3://$(ARTIFACTS_BUCKET)/prediction-logs/
+                - --labels=s3://$(ARTIFACTS_BUCKET)/labels/
+                - --since-hours=168
+                - --window-size=200
+                - --pushgateway=prometheus-pushgateway.monitoring.svc.cluster.local:9091
+                - --report=/tmp/drift_report.json
+              env:
+                - name: MODEL_NAME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: inference-config
+                      key: MODEL_NAME
+                - name: MLFLOW_TRACKING_URI
+                  valueFrom:
+                    configMapKeyRef:
+                      name: inference-config
+                      key: MLFLOW_TRACKING_URI
+                - name: ARTIFACTS_BUCKET
+                  valueFrom:
+                    configMapKeyRef:
+                      name: platform-config
+                      key: ARTIFACTS_BUCKET
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

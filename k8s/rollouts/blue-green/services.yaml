@@ -1,0 +1,25 @@
+# inference          what clients call (the active, "blue" version)
+# inference-preview  the new, "green" version, reachable only for checks before cutover
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference
+spec:
+  selector:
+    app: inference
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-preview
+spec:
+  selector:
+    app: inference
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

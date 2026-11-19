@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 mlruns/
+mlflow.db
 k8s_manifests/
 *.pkl
 .env
@@ -9,3 +10,17 @@ repo_dump.txt
 gh_dump.txt
 scripts/fix_imports.py
 scripts/fix_source_layout.py
+
+# Terraform: local working files, state, and per-person settings
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+infra/terraform/**/backend.hcl
+infra/terraform/**/terraform.tfvars
+
+# Local runs of the gate and drift check
+holdouts/
+predictions.jsonl
+gate_report.json
+drift_report.json

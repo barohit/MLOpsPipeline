@@ -1,36 +1,62 @@
-import json
 import os
-import pickle
 import time
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
-from starlette.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from starlette.responses import JSONResponse, Response
 
+from src.Infrastructure.Interfaces.base_inference_service import BaseInferenceService
+from src.MetricsAndMonitoring.Drift.prediction_log import PredictionLogger, build_prediction_logger
+from src.ModelTrainingAndDeployment.ModelRegistries.model_loader import load_model
 from src.ModelTrainingAndDeployment.feature_schema import FEATURE_COLUMNS, MODEL_NAME as DEFAULT_MODEL_NAME
 
 
 MODEL_NAME = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
 
+# Every metric carries model_version, so blue/green and canary pods can be compared
 REQUEST_COUNT = Counter(
     "team_win_prediction_requests_total",
     "Total prediction requests",
+    ["model_version"],
 )
 
 ERROR_COUNT = Counter(
     "team_win_prediction_errors_total",
     "Total prediction errors",
+    ["model_version"],
 )
 
 REQUEST_LATENCY = Histogram(
     "team_win_prediction_request_latency_seconds",
     "Prediction request latency in seconds",
+    ["model_version"],
 )
 
-model = None
+# The distribution of outputs: a cheap, label-free early warning, and what the canary
+# analysis compares between the old and new version
+PREDICTION_VALUE = Histogram(
+    "team_win_prediction_value",
+    "Predicted regular-season wins",
+    ["model_version"],
+    buckets=(0, 5, 10, 15, 20, 25, 30, 35, 40),
+)
+
+PREDICTION_LOG_ERRORS = Counter(
+    "team_win_prediction_log_errors_total",
+    "Predictions that could not be written to the prediction log",
+    ["model_version"],
+)
+
+MODEL_INFO = Gauge(
+    "team_win_model_info",
+    "The model version this pod is serving (value is always 1)",
+    ["model_name", "model_version"],
+)
 
 
 class TeamRegularSeasonWinCountPredictionRequest(BaseModel):
@@ -57,45 +83,85 @@ if set(TeamRegularSeasonWinCountPredictionRequest.model_fields) != set(FEATURE_C
     raise RuntimeError("Request fields do not match feature_schema.FEATURE_COLUMNS")
 
 
-def check_feature_columns(registered_columns) -> None:
-    """Refuse to serve a model that was trained on different features than this service sends."""
-    if registered_columns is not None and list(registered_columns) != FEATURE_COLUMNS:
-        raise RuntimeError(
-            "Training/serving mismatch: the registered model was trained on "
-            f"{list(registered_columns)} but this service sends {FEATURE_COLUMNS}"
-        )
+class TeamWinCountInferenceService(BaseInferenceService):
+    """Serves the linear regression that predicts a team's regular-season wins."""
+
+    @property
+    def input_columns(self) -> list[str]:
+        return list(FEATURE_COLUMNS)
+
+    @property
+    def output_name(self) -> str:
+        return "predicted_regular_season_wins"
+
+    def load(self) -> None:
+        if not self.model_uri:
+            raise RuntimeError("MODEL_URI environment variable is required")
+
+        # A LocalFileModelRegistry directory, models:/<name>/<version> or models:/<name>@<alias>
+        try:
+            loaded = load_model(self.model_uri)
+        except FileNotFoundError as error:
+            raise RuntimeError(str(error)) from error
+
+        self.check_feature_columns(loaded.metadata.get("feature_columns"))
+
+        self.metadata = loaded.metadata
+        self.model_version = loaded.version
+        self.model = loaded.model
+
+    def check_feature_columns(self, registered_columns) -> None:
+        """Refuse to serve a model that was trained on different features than this service sends."""
+        if registered_columns is not None and list(registered_columns) != self.input_columns:
+            raise RuntimeError(
+                "Training/serving mismatch: the registered model was trained on "
+                f"{list(registered_columns)} but this service sends {self.input_columns}"
+            )
+
+    def predict(self, features: dict[str, float]) -> dict[str, float]:
+        # A DataFrame with named columns: scikit-learn checks the names and order against training.
+        frame = pd.DataFrame([features], columns=self.input_columns)
+        return {self.output_name: float(self.model.predict(frame)[0])}
 
 
-def load_model(model_uri: str | None):
-    if not model_uri:
-        raise RuntimeError("MODEL_URI environment variable is required")
+inference_service: TeamWinCountInferenceService | None = None
+prediction_logger: PredictionLogger = build_prediction_logger(None)
 
-    model_file_path = os.path.join(model_uri, "model.pkl")
-    if not os.path.isfile(model_file_path):
-        raise RuntimeError(
-            f"No model.pkl in {model_uri}. This service loads from a LocalFileModelRegistry "
-            "directory; loading from an MLflow models:/ URI is not implemented yet."
-        )
 
-    with open(model_file_path, "rb") as model_file:
-        loaded_model = pickle.load(model_file)
-
-    metadata_file_path = os.path.join(model_uri, "metadata.json")
-    if os.path.isfile(metadata_file_path):
-        with open(metadata_file_path, encoding="utf-8") as metadata_file:
-            check_feature_columns(json.load(metadata_file).get("feature_columns"))
-
-    return loaded_model
+def _model_version() -> str:
+    return inference_service.model_version if inference_service is not None else "unknown"
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global model
-    model = load_model(os.getenv("MODEL_URI"))
+    global inference_service, prediction_logger
+    inference_service = TeamWinCountInferenceService(os.getenv("MODEL_URI"))
+    inference_service.load()
+    prediction_logger = build_prediction_logger()
+
+    version = inference_service.model_version
+    MODEL_INFO.labels(model_name=MODEL_NAME, model_version=version).set(1)
+    # Create the zero-valued series up front so dashboards and alerts see them immediately
+    for metric in (REQUEST_COUNT, ERROR_COUNT, PREDICTION_LOG_ERRORS):
+        metric.labels(model_version=version)
     yield
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/live")
+def live():
+    """Liveness: the process is up. Never checks the model, so a slow load isn't killed."""
+    return {"status": "alive"}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness: only send traffic once the model is in memory."""
+    if inference_service is None or not inference_service.is_loaded:
+        return JSONResponse(status_code=503, content={"status": "loading"})
+    return {"status": "ready", "model_version": inference_service.model_version}
 
 
 @app.get("/health")
@@ -103,7 +169,8 @@ def health():
     return {
         "status": "ok",
         "model_name": MODEL_NAME,
-        "model_loaded": model is not None,
+        "model_version": _model_version(),
+        "model_loaded": inference_service is not None and inference_service.is_loaded,
     }
 
 
@@ -113,24 +180,47 @@ def metrics():
 
 
 @app.post("/predict")
-def predict(request: TeamRegularSeasonWinCountPredictionRequest):
-    REQUEST_COUNT.inc()
+def predict(
+    request: TeamRegularSeasonWinCountPredictionRequest,
+    x_request_id: str | None = Header(default=None),
+):
+    version = _model_version()
+    REQUEST_COUNT.labels(model_version=version).inc()
     start_time = time.perf_counter()
 
+    # The caller's request ID if it sent one, so outcomes can be joined back later
+    request_id = x_request_id or str(uuid.uuid4())
+
     try:
-        if model is None:
+        if inference_service is None or not inference_service.is_loaded:
             raise HTTPException(status_code=500, detail="Model not loaded")
 
-        # A DataFrame with named columns: scikit-learn checks the names and order against training.
-        features = pd.DataFrame([request.model_dump()], columns=FEATURE_COLUMNS)
-        prediction = float(model.predict(features)[0])
+        features = request.model_dump()
+        result = inference_service.predict(features)
+        prediction = result[inference_service.output_name]
+        PREDICTION_VALUE.labels(model_version=version).observe(prediction)
+
+        try:
+            prediction_logger.log({
+                "request_id": request_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "model_name": MODEL_NAME,
+                "model_version": version,
+                "features": features,
+                "prediction": prediction,
+            })
+        except Exception:
+            # Losing a log line must never fail the prediction, but it is counted
+            PREDICTION_LOG_ERRORS.labels(model_version=version).inc()
 
         return {
             "model_name": MODEL_NAME,
-            "predicted_regular_season_wins": prediction,
+            "model_version": version,
+            "request_id": request_id,
+            **result,
         }
     except Exception as error:
-        ERROR_COUNT.inc()
+        ERROR_COUNT.labels(model_version=version).inc()
         raise HTTPException(status_code=500, detail=str(error))
     finally:
-        REQUEST_LATENCY.observe(time.perf_counter() - start_time)
+        REQUEST_LATENCY.labels(model_version=version).observe(time.perf_counter() - start_time)

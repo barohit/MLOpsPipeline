@@ -1,0 +1,14 @@
+# Teaches kustomize about Argo Rollouts, so the image override and the hashed
+# ConfigMap names also get rewritten inside Rollout objects (it only knows the
+# built-in workload kinds by default).
+nameReference:
+  - kind: ConfigMap
+    version: v1
+    fieldSpecs:
+      - path: spec/template/spec/containers/envFrom/configMapRef/name
+        kind: Rollout
+      - path: spec/template/spec/containers/env/valueFrom/configMapKeyRef/name
+        kind: Rollout
+images:
+  - path: spec/template/spec/containers[]/image
+    kind: Rollout

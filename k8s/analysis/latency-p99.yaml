@@ -1,0 +1,25 @@
+# Fails the rollout if the new version's p99 latency goes above 500ms.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency-p99
+spec:
+  args:
+    - name: canary-hash
+    - name: threshold-seconds
+      value: "0.5"
+    - name: prometheus-address
+      value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+    - name: latency-p99
+      interval: 1m
+      count: 5
+      failureLimit: 1
+      # NaN means no requests in the window yet; don't fail on silence
+      successCondition: isNaN(result[0]) || result[0] < {{args.threshold-seconds}}
+      provider:
+        prometheus:
+          address: "{{args.prometheus-address}}"
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(team_win_prediction_request_latency_seconds_bucket{rollouts_pod_template_hash="{{args.canary-hash}}"}[2m])) by (le))
